@@ -186,10 +186,10 @@ assets:
   # macOS has a single libc family, so no suffix and no container legs.
   # Uncommented together with the matching `platforms:` keys in
   # ../mirror-base.yml, never on their own.
-  # darwin/amd64:
-  #   - "^biome-darwin-x64$"
-  # darwin/arm64:
-  #   - "^biome-darwin-arm64$"
+  darwin/amd64:
+    - "^biome-darwin-x64$"
+  darwin/arm64:
+    - "^biome-darwin-arm64$"
   #
   # ── Pass 3 (windows) ───────────────────────────────────────────────────────
   # The Windows assets are the only ones carrying an extension, and `\.exe$` is

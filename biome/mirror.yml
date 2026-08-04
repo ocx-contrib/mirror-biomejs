@@ -241,7 +241,7 @@ versions:
   # exactly what `@biomejs/js-api@6.0.0` would have been — see tag_pattern).
   min: "2.5.4"
   new_per_run: 5
-  poll_interval: "55 */6 * * *"
+  poll_interval: "44 1-23/6 * * *"
 
 tests:
   # `script:` resolves from the REPOSITORY ROOT — unlike `metadata.default` and

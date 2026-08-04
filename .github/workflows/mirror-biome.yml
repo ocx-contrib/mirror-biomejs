@@ -6,7 +6,7 @@ name: biome
 
 on:
   schedule:
-    - cron: '55 */6 * * *'
+    - cron: '44 1-23/6 * * *'
   workflow_dispatch:
   push:
     branches: [main]

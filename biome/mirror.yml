@@ -194,10 +194,10 @@ assets:
   # ── Pass 3 (windows) ───────────────────────────────────────────────────────
   # The Windows assets are the only ones carrying an extension, and `\.exe$` is
   # what both selects them and keeps the anchor meaningful.
-  # windows/amd64:
-  #   - "^biome-win32-x64\\.exe$"
-  # windows/arm64:
-  #   - "^biome-win32-arm64\\.exe$"
+  windows/amd64:
+    - "^biome-win32-x64\\.exe$"
+  windows/arm64:
+    - "^biome-win32-arm64\\.exe$"
 
 asset_type:
   # Raw binary on every platform — there is no archive to strip, so the file

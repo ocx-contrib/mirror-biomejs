@@ -48,17 +48,6 @@ at all. `biome init` writes a `biome.json` when you want to change them:
 }
 ```
 
-## Install with ocx
-
-```sh
-ocx install ocx.sh/biomejs/biome
-```
-
-```sh
-# or pin a specific version
-ocx install ocx.sh/biomejs/biome:2.5.6
-```
-
 ## Links
 
 - [Biome website](https://biomejs.dev)

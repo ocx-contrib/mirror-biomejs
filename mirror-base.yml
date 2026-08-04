@@ -1,0 +1,136 @@
+# Shared base for every spec in this repository (biome, the formatter, linter
+# and import-sorter for JavaScript/TypeScript/JSON/CSS/GraphQL published by the
+# Biome team).
+#
+# NOT a spec: it has no name/target/source and is never loaded on its own.
+# Everything a package owns — name, target, source, assets, asset_type,
+# bin_scan, metadata, catalog, tests, versions, announce, annotations — stays
+# in that package's own mirror.yml.
+#
+# ⚠️ `extends:` is a SHALLOW merge of top-level keys. A spec that sets a key
+# below replaces that block OUTRIGHT — there is no per-key merge. `platforms:`
+# is where this bites: it carries BOTH the runner matrix and the container
+# legs, so a child that restates it to tweak one runner silently drops every
+# `containers:` entry. Nothing reds — the legs simply stop existing, and every
+# os.features claim in that spec goes back to being merely asserted. Restate
+# `platforms:` IN FULL or not at all. This repo is single-package, so the
+# measured matrix lives HERE and biome/mirror.yml does not restate it, which
+# removes the trap structurally.
+
+skip_prereleases: true
+cascade: true
+
+# New package, bare semver versions (`2.5.6`) that carry no `+build` segment,
+# so the fleet default applies with no exception. A cascade tag (`latest`, `2`,
+# `2.5`) re-points on every re-publish; without a build segment the new
+# manifest would reuse the bare version tag and orphan the prior digest for
+# registry GC, breaking any `@sha256:` pin in a consumer's ocx.lock.
+build_timestamp: date
+
+verify:
+  # Upstream publishes NO checksum and NO signature sidecar on any biome
+  # release — unusual for this fleet, and verified across every in-range tag
+  # (each ships exactly 8 assets, all of them binaries). This flag does not
+  # depend on one: it compares against the `digest` GitHub itself records per
+  # asset (`gh api …/releases/tags/<t> --jq '.assets[].digest'` returns a
+  # populated `sha256:…` for all 8 on 2.5.4, 2.5.5 and 2.5.6), so the integrity
+  # check is intact despite the missing sidecars.
+  github_asset_digest: true
+
+concurrency:
+  # Assets are raw 56–82 MB Rust binaries — no archive layer, so a "bundle"
+  # here is a single large file recompressed, and xz on 80 MB is the expensive
+  # part. Six platforms × three versions.
+  max_downloads: 4
+  max_bundles: 2
+  max_pushes: 2
+  rate_limit_ms: 100
+  max_retries: 3
+  compression_threads: 0
+
+# `bin_scan` is FORCED off, not chosen. Every asset is a RAW BINARY, so it
+# lands directly at the content root and metadata.json's PATH is a bare
+# `${installPath}` — the one layout where that is correct. The scan only
+# inspects an interface-visible `${installPath}/<dir>` entry, so with no
+# subdirectory to point at, `auto` and `verify` both fail spec load at exit 65
+# ("bin_scan is enabled but … declares no interface-visible ${installPath}/<dir>
+# PATH entry"). `off` with a hand-listed `binaries` in metadata.json is what
+# that error message itself directs.
+#
+# The hand list is LOAD-BEARING here beyond documentation: GitHub serves a raw
+# release asset with mode 0644 (measured — `stat` on all nine downloaded biome
+# assets returns 644), and `prepare` chmods 0755 exactly the names
+# metadata.json DECLARES (ocx-mirror ≥ 0.5.2). An undeclared binary would ship
+# non-executable, and `bin_scan: auto` cannot rescue it — the scan only reports
+# candidates it finds ALREADY executable. Quoted so no YAML 1.1 reader folds
+# the bare word into boolean `false`.
+bin_scan: "off"
+
+# ─── Platform matrix ────────────────────────────────────────────────────────
+#
+# `os.features` states what an artifact REQUIRES OF THE HOST — it is not a
+# label for how it was built. Upstream ships FOUR Linux artifacts per release
+# (gnu and musl for each arch); this mirror takes the two MUSL ones, and they
+# are the reason both Linux keys are BARE rather than `+libc.musl`: they are
+# statically linked, so they require nothing at all. The full measurement
+# transcript — both arches, both ends of the mirrored range — is recorded above
+# biome/mirror.yml's `assets:`, together with why the gnu builds are not
+# published under a second `+libc.glibc` key.
+#
+# A bare key claims universality, so it must prove it: ubuntu (glibc) + alpine
+# (musl) + fedora (a different glibc vintage). The ALPINE LEG IS THE PROOF —
+# drop it and the universal claim is merely asserted.
+#
+# NO `containers[].setup` anywhere, deliberately. The published artifacts have
+# ZERO DT_NEEDED entries, and biome shells out to nothing: it is a
+# self-contained parser/formatter/linter that only reads and writes files the
+# smoke test itself creates in the scratch sandbox. Provisioning a package into
+# these images would weaken the claim rather than support it — a bare image is
+# what makes "this artifact needs NOTHING of the host" testable. Verified by
+# running the published musl binary in a stock `alpine:3.20` with no `apk add`
+# at all; the transcript is in biome/mirror.yml.
+platforms:
+  linux/amd64:
+    runner: ubuntu-latest
+    containers: &linux_containers
+      - { image: "ubuntu:24.04", shell: bash }
+      - { image: "alpine:3.20", shell: sh }
+      - { image: "fedora:40", shell: bash }
+  linux/arm64:
+    # arm64 container legs run natively — no qemu — so the runner arch must
+    # match the platform or the renderer reds the leg up front. The container
+    # set is the same three images, aliased rather than copied so the two
+    # arches can never drift apart.
+    runner: ubuntu-24.04-arm
+    containers: *linux_containers
+  # No `containers:` on darwin or windows — those runners have no Linux
+  # container engine, and the key is rejected at spec load.
+  #
+  # ── Pass 2 (darwin) ────────────────────────────────────────────────────────
+  # Kept commented in lockstep with the matching `assets:` keys in
+  # biome/mirror.yml. Staging `assets:` ALONE would not save runner minutes: a
+  # platform with no resolvable asset self-skips per VERSION but still boots a
+  # real macOS/Windows runner and reports SUCCESS having tested nothing. So the
+  # platform key and its asset regex are uncommented in the SAME pass.
+  # darwin/amd64:
+  #   # Intel slice tested on the arm64 macos-14 runner via Rosetta 2 —
+  #   # GitHub's native macos-13 Intel pool is exhausted and deadlocks push.
+  #   runner: macos-14
+  #   prefix: ["arch", "-x86_64"]
+  # darwin/arm64:
+  #   runner: macos-14
+  #   shell: bash
+  #
+  # ── Pass 3 (windows) ───────────────────────────────────────────────────────
+  # windows/amd64:
+  #   runner: windows-latest
+  #   shell: pwsh
+  # windows/arm64:
+  #   # Native arm64 Windows runner — the amd64 pool cannot execute an ARM64 PE.
+  #   runner: windows-11-arm
+  #   shell: pwsh
+
+notify:
+  discord:
+    webhook_secret: OCX_MIRROR_DISCORD_HOOK
+    user_id: "227748867204972545"  # pinged in-message on failures

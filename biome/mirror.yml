@@ -1,0 +1,262 @@
+# ⚠ `extends:` is a SHALLOW merge of TOP-LEVEL KEYS. Setting a key here
+# REPLACES the base's block outright — there is no per-key merge. `platforms:`
+# is deliberately NOT restated below: it carries the container legs that make
+# this spec's bare Linux keys honest, and restating it to tweak one runner
+# would drop them all without reddening anything. This repo is single-package,
+# so the measured matrix lives in the base and nothing here touches it.
+extends: ../mirror-base.yml
+
+name: biome
+
+# Logical index package `biomejs/biome` at the physical path
+# `ghcr.io/ocx-contrib/biomejs/biome` — slash segments, never hyphen-flattened.
+# Two segments always. `biomejs` is the project's OWN brand (the org exists for
+# Biome and nothing else; it also owns biomejs/resources, biomejs/website,
+# biomejs/setup-biome), so the org names the namespace — skill Phase 1 rule 2,
+# the same reason jq is `jqlang/jq`. The first segment must be this repo's own
+# GitHub owner: GITHUB_TOKEN only authorises packages owned by the repo the
+# workflow runs in.
+target:
+  registry: ghcr.io
+  repository: ocx-contrib/biomejs/biome
+
+source:
+  type: github_release
+  owner: biomejs
+  repo: biome
+
+  # ─── THE NPM-SCOPED TAG, AND WHY THE PACKAGE NAME IS ANCHORED LITERALLY ────
+  #
+  # biome is released from a JS monorepo and its git tags are literal npm
+  # coordinates: `@biomejs/biome@2.5.6`. The `@biomejs/biome@` prefix is matched
+  # as a LITERAL STRING, not as a wildcard scope, because the same repository
+  # tags OTHER npm packages under the SAME scope. Measured over the last 100
+  # releases:
+  #
+  #   $ gh api "repos/biomejs/biome/releases?per_page=100" --jq '.[].tag_name' \
+  #       | sed 's/@[0-9].*$//' | sort | uniq -c
+  #        64 @biomejs/biome
+  #         8 @biomejs/js-api
+  #         4 @biomejs/js-api@v0.8.0-beta…      (4 distinct beta tags)
+  #        20 cli/v1.x…  /  js-api/v0.x…        (the dead pre-2.0 scheme)
+  #
+  # `@biomejs/js-api` is a separate WASM/JS-API bindings package whose GitHub
+  # releases carry **ZERO assets**, and it interleaves BY DATE with biome:
+  # `@biomejs/js-api@6.0.0` was published 2026-06-12T12:06:53Z, two minutes
+  # before `@biomejs/biome@2.5.0` at 12:09:51Z. A wildcard-scope pattern such as
+  # `^@biomejs/.*@(\d+\.\d+\.\d+)$` matches it and admits an asset-less release
+  # into the plan — and an asset-less in-range release is SILENTLY DROPPED by
+  # the pipeline rather than reported, so nothing would ever red. The literal
+  # `biome@` is what keeps it out. (It also sits below this mirror's 2.5.4
+  # floor, so it is out of range today; the anchor is what keeps a FUTURE
+  # js-api 7.x from walking into the range.)
+  #
+  # The `cli/vX.Y.Z` and `js-api/vX.Y.Z` tags are biome's pre-2.0 scheme,
+  # abandoned after 1.9.x. The same literal anchor excludes them, and 1.9.4 is
+  # far below the floor besides.
+  #
+  # Anchored BOTH ends. `$` matters independently: it is what rejects the
+  # `-beta`/`-nightly` suffixed tags in the listing above without relying on
+  # `skip_prereleases` (which reads GitHub's prerelease FLAG, not the tag text —
+  # every one of those beta tags is flagged `prerelease: false`).
+  tag_pattern: "^@biomejs/biome@(?P<version>\\d+\\.\\d+\\.\\d+)$"
+
+# ─── libc gate (Phase 3.5) — the evidence, not the conclusion ───────────────
+#
+# `os.features` states what an artifact REQUIRES OF THE HOST. Upstream ships
+# FOUR Linux artifacts per release — a gnu and a musl build for each arch — so
+# this had to be measured per variant rather than inferred from the filename.
+# All four were measured at BOTH ends of the mirrored range (2.5.4 and 2.5.6),
+# eight artifacts in total:
+#
+#   $ file biome-linux-x64-musl          # and biome-linux-arm64-musl
+#   ELF 64-bit LSB pie executable, x86-64, …, static-pie linked, stripped
+#   ELF 64-bit LSB executable, ARM aarch64, …, statically linked, stripped
+#   $ readelf -l biome-linux-{x64,arm64}-musl | grep -c INTERP   → 0  (all four)
+#   $ readelf -d biome-linux-{x64,arm64}-musl | grep -c NEEDED   → 0  (all four)
+#
+#     ⇒ the musl builds require NOTHING of the host → BARE `linux/amd64` and
+#       `linux/arm64`. `+libc.musl` would be a FALSE requirement on a static
+#       binary: it would hide the package from every glibc host it in fact runs
+#       on. The alpine container leg in ../mirror-base.yml is what turns that
+#       universality claim into evidence.
+#
+#   $ file biome-linux-x64               # and biome-linux-arm64 — the gnu pair
+#   ELF 64-bit LSB pie executable, x86-64, …, dynamically linked,
+#   interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 3.2.0, stripped
+#   $ readelf -d biome-linux-x64 | grep NEEDED
+#   libgcc_s.so.1  libpthread.so.0  libm.so.6  libdl.so.2  libc.so.6
+#       (identical five on arm64, interpreter /lib/ld-linux-aarch64.so.1)
+#
+#     ⇒ the gnu builds genuinely REQUIRE glibc and could only ever be published
+#       under `+libc.glibc`. They are NOT published — see the next block.
+#
+#   $ strings -a biome-linux-* | grep -c '^UPX'   → 0 (all eight)
+#   $ readelf -h … | grep 'Start of section headers'  → non-zero (all eight)
+#       Not UPX-packed, so `file`'s "statically linked" verdict on the musl
+#       pair is real and not a packer stub masking a PT_INTERP.
+#
+#   $ stat -c '%a' biome-linux-*                  → 644 (every asset)
+#       GitHub serves raw binaries WITHOUT the exec bit. `prepare` chmods 0755
+#       exactly the names metadata.json declares, which is why the hand-listed
+#       `binaries` claim there is load-bearing rather than documentation.
+#
+# Decisive cross-check — the static claim run against real loaders, and shown
+# to be falsifiable:
+#
+#   $ docker run --rm -v .:/m:ro alpine:3.20 /m/biome-linux-x64-musl --version
+#   Version: 2.5.6                                       (exit 0, NO `apk add`)
+#   $ docker run --rm -v .:/m:ro alpine:3.20 /m/biome-linux-x64 --version
+#   sh: /m/biome-linux-x64: not found                     (exit 127 — the gnu
+#       build under a musl loader, i.e. a red alpine leg IS reachable)
+#   $ … ubuntu:24.04 /m/biome-linux-x64-musl --version    → exit 0
+#   $ … fedora:40    /m/biome-linux-x64-musl --version    → exit 0
+#
+# ─── Why there is no second `+libc.glibc` key ───────────────────────────────
+#
+# Publishing the static build under a bare key AND the gnu build under
+# `+libc.glibc` is safe and unambiguous (specificity scoring hands a glibc host
+# the gnu build and a musl host the static one). It was measured and declined:
+# the gnu build carries NO capability the musl one lacks. biome resolves no
+# hostnames, opens no sockets, dlopens nothing and bundles no runtime — its
+# plugins are interpreted GritQL text, not shared objects — so the usual
+# justification (musl's resolver ignoring nsswitch.conf/NSS modules) cannot
+# arise. The only reachable difference is throughput, and it is small in
+# absolute terms: formatting a generated 4 000-function file, five runs each,
+#
+#   biome-linux-x64        median 0.064 s
+#   biome-linux-x64-musl   median 0.085 s
+#
+# — a ~33 % delta on an operation that takes under a tenth of a second. Two
+# keys is the fallback, not the goal (skill Phase 3.5), so one bare key per
+# arch it is. The numbers are recorded here rather than the conclusion alone,
+# so a future maintainer who disagrees can revisit without re-deriving them.
+#
+# ─── Asset format + the prefix collision ────────────────────────────────────
+#
+# Every asset is a RAW UNCOMPRESSED BINARY — no tarball, no zip, not even a
+# bare `.gz` twin. Eight per release, uniform across the whole range:
+#
+#   biome-{darwin,linux}-{x64,arm64}  biome-linux-{x64,arm64}-musl
+#   biome-win32-{x64,arm64}.exe
+#
+# The os/arch tokens are npm/Node convention, NOT Rust or Go convention:
+# `win32` for Windows and `x64` for amd64. Those spellings appear only in the
+# regexes below; the platform KEYS use ocx's own vocabulary (`windows/amd64`).
+#
+# EVERY pattern is END-ANCHORED, and on this upstream that is load-bearing
+# rather than hygiene: `biome-linux-x64` is a strict PREFIX of
+# `biome-linux-x64-musl` (identically for arm64). An unanchored
+# `^biome-linux-x64` matches BOTH, which is a hard ambiguous error; the reverse
+# mistake — dropping the `-musl` suffix from the pattern intending the static
+# build — would silently ship the glibc-dynamic binary under a bare key, the
+# exact false universality claim this whole block exists to prevent.
+#
+# ─── Scope + resolution (verified on EVERY in-range release) ────────────────
+#
+# The mirrored range is exactly 2.5.4, 2.5.5 and 2.5.6 — three releases. Each
+# ships EXACTLY the same 8 assets (`gh api …/releases/tags/<t> --jq
+# '.assets[].name'`, re-listed per tag rather than assumed), and each of the six
+# patterns below matches EXACTLY ONE of them, every time, both ways. A pattern
+# matching zero is silently skipped rather than an error, which would yield a
+# green run with a missing platform. No in-range release is asset-less.
+#
+# The usual "do the asset names carry THEIR OWN version?" check does not apply
+# here and had to be replaced: biome's asset filenames are VERSION-INDEPENDENT
+# (`biome-linux-x64` on every release), so an upstream shipping the previous
+# version's bytes under a new tag could not be spotted by name. Checked two
+# other ways instead — all 24 in-range asset digests are distinct, and each of
+# the three linux/amd64 binaries was executed and self-reported ITS OWN tag:
+#
+#   $ ./2.5.4/biome-linux-x64 --version → Version: 2.5.4
+#   $ ./2.5.5/biome-linux-x64 --version → Version: 2.5.5
+#   $ ./2.5.6/biome-linux-x64 --version → Version: 2.5.6
+#
+# Upstream also publishes, and this mirror deliberately does not carry:
+#   biome-linux-{x64,arm64}          — the glibc-dynamic twins; see above
+# Nothing else. There are no sidecars at all: no .sha256, no .sig, no .asc,
+# no SBOM, no source tarball beyond GitHub's auto-generated ones (which the
+# releases API does not list under `assets`).
+assets:
+  linux/amd64:
+    - "^biome-linux-x64-musl$"
+  linux/arm64:
+    - "^biome-linux-arm64-musl$"
+  # ── Pass 2 (darwin) ────────────────────────────────────────────────────────
+  # macOS has a single libc family, so no suffix and no container legs.
+  # Uncommented together with the matching `platforms:` keys in
+  # ../mirror-base.yml, never on their own.
+  # darwin/amd64:
+  #   - "^biome-darwin-x64$"
+  # darwin/arm64:
+  #   - "^biome-darwin-arm64$"
+  #
+  # ── Pass 3 (windows) ───────────────────────────────────────────────────────
+  # The Windows assets are the only ones carrying an extension, and `\.exe$` is
+  # what both selects them and keeps the anchor meaningful.
+  # windows/amd64:
+  #   - "^biome-win32-x64\\.exe$"
+  # windows/arm64:
+  #   - "^biome-win32-arm64\\.exe$"
+
+asset_type:
+  # Raw binary on every platform — there is no archive to strip, so the file
+  # lands directly at the content root and PATH is a bare ${installPath}. That
+  # is the one layout where a bare ${installPath} is correct, and it is why
+  # `bin_scan` must stay `off` with `binaries` hand-listed (../mirror-base.yml).
+  #
+  # `name: biome` renames each platform's asset (biome-linux-x64-musl,
+  # biome-win32-x64.exe, …) to the single name every platform's PATH entry
+  # expects. The upstream Windows assets already END in `.exe`, so the suffix
+  # survives into the bundle and no per-platform `name: biome.exe` override is
+  # needed — `asset_type: binary` PRESERVES an existing suffix but never
+  # SYNTHESISES one, so this had to be verified rather than assumed. Verified
+  # runner-free by running `pipeline prepare` against throwaway windows-only
+  # temp specs (one per arch, in the gitignored .ocx-mirror/) and listing the
+  # bundles:
+  #     tar tvf … → -rwxr-xr-x  biome.exe        (windows/amd64)
+  #     tar tvf … → -rwxr-xr-x  biome.exe        (windows/arm64)
+  type: binary
+  name: biome
+
+metadata:
+  default: metadata.json
+
+catalog:
+  logo: logo.svg
+
+versions:
+  # 2.5.4 is the floor. Nothing in the asset naming or layout forces it — the
+  # 8-asset scheme is uniform back through 2.3.x — so it is a CATALOG-SCOPE
+  # choice: the current 2.5.x train, three releases, rather than backfilling
+  # sixty-odd tags. Every release from it up is complete: all 8 assets present,
+  # no in-range release missing a declared platform, and an asset-less release
+  # inside the range would be dropped SILENTLY by the pipeline (which is
+  # exactly what `@biomejs/js-api@6.0.0` would have been — see tag_pattern).
+  min: "2.5.4"
+  new_per_run: 5
+  poll_interval: "55 */6 * * *"
+
+tests:
+  # `script:` resolves from the REPOSITORY ROOT — unlike `metadata.default` and
+  # `catalog.logo` above, which resolve against this spec's own directory.
+  - name: smoke
+    script: biome/tests/smoke.star
+
+annotations:
+  # From the Phase 1.5 license gate:
+  #   $ gh api repos/biomejs/biome/license --jq '{spdx:.license.spdx_id,path:.path}'
+  #   {"path":"LICENSE-APACHE","spdx":"Apache-2.0"}
+  # GitHub reports only the file it detected first. The repository is in fact
+  # DUAL licensed — LICENSE-APACHE and LICENSE-MIT both sit at the root, and
+  # Cargo.toml declares `license = "MIT OR Apache-2.0"` — so the honest SPDX
+  # EXPRESSION is the disjunction, not either half. Both are permissive and
+  # both grant redistribution of the compiled binary, so the gate verdict is
+  # MIRROR either way.
+  org.opencontainers.image.licenses: "MIT OR Apache-2.0"
+
+announce:
+  # Spelled out, not derived from target.repository — the logical name and the
+  # physical path are related by convention only.
+  package: biomejs/biome
+  fork: ocx-contrib/index

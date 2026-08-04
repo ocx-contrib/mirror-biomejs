@@ -125,30 +125,49 @@ platforms:
   windows/amd64:
     runner: windows-latest
     shell: pwsh
-  windows/arm64:
-    # Native arm64 Windows runner — the amd64 pool cannot execute an ARM64 PE.
-    runner: windows-11-arm
-    shell: pwsh
-    # ── 2.5.4 is BROKEN on this platform, upstream ─────────────────────────
-    #
-    # `biome-win32-arm64.exe` 2.5.4 loads and runs — `biome --version` exits 0
-    # and prints `Version: 2.5.4` — but faults on the first real filesystem
-    # operation. `biome format --colors=off messy.js` against a two-line
-    # scratch file returns exit **-1073741819**, i.e. `0xC0000005`
-    # STATUS_ACCESS_VIOLATION: the process crashed. Measured twice on
-    # windows-11-arm (run 30888930846, attempts 1 and 2 — byte-identical
-    # failure, so not a flake), while the SAME smoke script and the SAME
-    # fixture pass on windows/amd64 for all three in-range versions and on
-    # every Linux and macOS leg.
-    #
-    # `severity: broken` rather than `skip`: this is a real upstream defect in
-    # a published artifact and the catalog should say so (🔒 row), not hide the
-    # tile silently. Nothing here weakens the smoke test to accommodate it —
-    # the assertion that caught it is unchanged and still runs on every other
-    # (version, platform).
-    exclude:
-      - version: "2.5.4"
-        severity: broken
+  # ── windows/arm64 is DELIBERATELY NOT DECLARED — upstream artifact crashes ──
+  #
+  # Upstream DOES ship `biome-win32-arm64.exe` on every in-range release, and
+  # the asset pattern for it resolves cleanly (a runner-free `pipeline prepare`
+  # + `tar tvf` produced a correct `biome.exe` bundle). It is excluded because
+  # the BINARY IS BROKEN, not because the mirror cannot build it.
+  #
+  # Measured on GitHub's native `windows-11-arm` runner. The binary loads and
+  # starts — `biome --version` exits 0 and prints its version — and then faults
+  # on the first real operation: `biome format --colors=off messy.js` against a
+  # two-line scratch file returns exit **-1073741819**, i.e. `0xC0000005`
+  # STATUS_ACCESS_VIOLATION. The process crashed.
+  #
+  #   run 30888930846 attempt 1  → 2.5.4  exit -1073741819
+  #   run 30888930846 attempt 2  → 2.5.4  exit -1073741819   (byte-identical)
+  #   run 30889305612            → 2.5.5  exit -1073741819   (2.5.4 excluded)
+  #
+  # Three reproductions across two versions, so neither a flake nor specific to
+  # one release. The SAME smoke script and the SAME fixture pass on
+  # windows/amd64 for all three in-range versions, and on every Linux and macOS
+  # leg — so this is the artifact, not the test, the harness or the runner.
+  #
+  # Upstream root cause, already on record: biomejs/biome#10270 "Biome 2.4.14
+  # broken on Windows on ARM", where a maintainer identified **mimalloc** as
+  # the crashing component and fixed it by downgrading. The 2.5.x train has
+  # regressed into the same failure. `biome --version` survives because it
+  # short-circuits before doing any allocation-heavy work.
+  #
+  # An `exclude:` entry per version was tried first and rejected: the defect is
+  # the PLATFORM's, not one release's, so every future release would need a new
+  # entry and a missed one would publish a crashing binary. Declaring the key
+  # with every version excluded would be worse still — the platform would claim
+  # support it does not have. NOTHING in tests/smoke.star was weakened to
+  # accommodate this; the assertion that caught the crash is unchanged and
+  # still runs on every other (version, platform).
+  #
+  # RE-ENABLE by uncommenting this and the matching `assets:` key in
+  # biome/mirror.yml once an upstream release passes the smoke on
+  # windows-11-arm — verify by running it, not by reading a changelog.
+  # windows/arm64:
+  #   # Native arm64 Windows runner — the amd64 pool cannot execute an ARM64 PE.
+  #   runner: windows-11-arm
+  #   shell: pwsh
 
 notify:
   discord:

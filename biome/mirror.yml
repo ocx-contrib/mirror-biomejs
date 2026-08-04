@@ -196,8 +196,14 @@ assets:
   # what both selects them and keeps the anchor meaningful.
   windows/amd64:
     - "^biome-win32-x64\\.exe$"
-  windows/arm64:
-    - "^biome-win32-arm64\\.exe$"
+  # `biome-win32-arm64.exe` IS shipped upstream on every in-range release and
+  # this pattern resolves it cleanly — the platform is excluded because the
+  # binary crashes with 0xC0000005 (mimalloc on Windows-on-ARM, upstream
+  # biomejs/biome#10270), not because the asset is missing. Full evidence and
+  # the re-enable instruction sit above the matching commented `platforms:`
+  # key in ../mirror-base.yml; uncomment the two together, never one alone.
+  # windows/arm64:
+  #   - "^biome-win32-arm64\\.exe$"
 
 asset_type:
   # Raw binary on every platform — there is no archive to strip, so the file

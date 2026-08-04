@@ -55,8 +55,11 @@ not catch, plus the abandoned pre-2.0 `cli/vX.Y.Z` scheme.
 
 ## Platforms
 
-Six platform entries: both Linux arches, both macOS arches and both Windows
-arches. Upstream's os/arch tokens are npm/Node convention rather than Rust or
+Five platform entries: both Linux arches, both macOS arches and
+`windows/amd64`. `windows/arm64` is shipped upstream but deliberately not
+published — the binary crashes; see below.
+
+Upstream's os/arch tokens are npm/Node convention rather than Rust or
 Go convention — `win32` for Windows, `x64` for amd64 — so the asset regexes
 spell it upstream's way while the platform keys use ocx's (`windows/amd64`).
 
@@ -92,21 +95,44 @@ median was 0.064 s against the musl build's 0.085 s. A ~33 % delta on an
 operation taking under a tenth of a second is not a capability, and two keys is
 the fallback rather than the goal.
 
-### `windows/arm64` is broken on 2.5.4, upstream
+### `windows/arm64` is not published — the upstream binary crashes
 
-`biome-win32-arm64.exe` **2.5.4** loads and runs — `biome --version` exits 0
-and prints its version — but faults on the first real filesystem operation:
-`biome format` against a two-line scratch file returns exit `-1073741819`,
-i.e. `0xC0000005` STATUS_ACCESS_VIOLATION. Measured twice on `windows-11-arm`
-with a byte-identical failure, so not a flake, while the same script and the
-same fixture pass on `windows/amd64` for every in-range version and on every
-Linux and macOS leg.
+Upstream **does** ship `biome-win32-arm64.exe` on every in-range release, and
+this mirror's pattern for it resolves cleanly — a runner-free `pipeline
+prepare` + `tar tvf` produced a correct `biome.exe` bundle. The platform is
+excluded because the **binary is broken**, not because the mirror cannot build
+it.
 
-That version is therefore excluded for that one platform via
-`platforms."windows/arm64".exclude` with `severity: broken`, which surfaces it
-as a 🔒 row rather than hiding the tile. The smoke test was **not** weakened to
-accommodate it — the assertion that caught the crash is unchanged and still
-runs on every other `(version, platform)`.
+On GitHub's native `windows-11-arm` runner the binary loads and starts —
+`biome --version` exits 0 and prints its version — then faults on the first
+real operation. `biome format` against a two-line scratch file returns exit
+`-1073741819`, i.e. `0xC0000005` STATUS_ACCESS_VIOLATION:
+
+| Run | Version | Result |
+|---|---|---|
+| [30888930846](https://github.com/ocx-contrib/mirror-biomejs/actions/runs/30888930846) attempt 1 | 2.5.4 | exit `-1073741819` |
+| [30888930846](https://github.com/ocx-contrib/mirror-biomejs/actions/runs/30888930846) attempt 2 | 2.5.4 | exit `-1073741819` (byte-identical) |
+| [30889305612](https://github.com/ocx-contrib/mirror-biomejs/actions/runs/30889305612) | 2.5.5 | exit `-1073741819` |
+
+Three reproductions across two versions — neither a flake nor specific to one
+release — while the same script and the same fixture pass on `windows/amd64`
+for every in-range version and on every Linux and macOS leg. So it is the
+artifact, not the test, the harness or the runner.
+
+Upstream root cause is on record:
+[biomejs/biome#10270](https://github.com/biomejs/biome/issues/10270) *"Biome
+2.4.14 broken on Windows on ARM"*, where a maintainer identified **mimalloc**
+as the crashing component and fixed it by downgrading. The 2.5.x train has
+regressed into the same failure; `--version` survives only because it
+short-circuits before any allocation-heavy work.
+
+A per-version `exclude:` was tried first and rejected: the defect belongs to
+the platform, not to one release, so every future release would need a new
+entry and a missed one would publish a crashing binary. The smoke test was
+**not** weakened — the assertion that caught the crash is unchanged and still
+runs on every other `(version, platform)`. Both the `platforms:` key and its
+`assets:` pattern are pre-written as comments; uncomment them together once an
+upstream release passes the smoke on `windows-11-arm`.
 
 No container leg runs `containers[].setup`. The artifacts have zero
 `DT_NEEDED`, and biome shells out to nothing — it only reads and writes files

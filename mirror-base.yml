@@ -129,6 +129,26 @@ platforms:
     # Native arm64 Windows runner — the amd64 pool cannot execute an ARM64 PE.
     runner: windows-11-arm
     shell: pwsh
+    # ── 2.5.4 is BROKEN on this platform, upstream ─────────────────────────
+    #
+    # `biome-win32-arm64.exe` 2.5.4 loads and runs — `biome --version` exits 0
+    # and prints `Version: 2.5.4` — but faults on the first real filesystem
+    # operation. `biome format --colors=off messy.js` against a two-line
+    # scratch file returns exit **-1073741819**, i.e. `0xC0000005`
+    # STATUS_ACCESS_VIOLATION: the process crashed. Measured twice on
+    # windows-11-arm (run 30888930846, attempts 1 and 2 — byte-identical
+    # failure, so not a flake), while the SAME smoke script and the SAME
+    # fixture pass on windows/amd64 for all three in-range versions and on
+    # every Linux and macOS leg.
+    #
+    # `severity: broken` rather than `skip`: this is a real upstream defect in
+    # a published artifact and the catalog should say so (🔒 row), not hide the
+    # tile silently. Nothing here weakens the smoke test to accommodate it —
+    # the assertion that caught it is unchanged and still runs on every other
+    # (version, platform).
+    exclude:
+      - version: "2.5.4"
+        severity: broken
 
 notify:
   discord:

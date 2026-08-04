@@ -92,6 +92,22 @@ median was 0.064 s against the musl build's 0.085 s. A ~33 % delta on an
 operation taking under a tenth of a second is not a capability, and two keys is
 the fallback rather than the goal.
 
+### `windows/arm64` is broken on 2.5.4, upstream
+
+`biome-win32-arm64.exe` **2.5.4** loads and runs — `biome --version` exits 0
+and prints its version — but faults on the first real filesystem operation:
+`biome format` against a two-line scratch file returns exit `-1073741819`,
+i.e. `0xC0000005` STATUS_ACCESS_VIOLATION. Measured twice on `windows-11-arm`
+with a byte-identical failure, so not a flake, while the same script and the
+same fixture pass on `windows/amd64` for every in-range version and on every
+Linux and macOS leg.
+
+That version is therefore excluded for that one platform via
+`platforms."windows/arm64".exclude` with `severity: broken`, which surfaces it
+as a 🔒 row rather than hiding the tile. The smoke test was **not** weakened to
+accommodate it — the assertion that caught the crash is unchanged and still
+runs on every other `(version, platform)`.
+
 No container leg runs `containers[].setup`. The artifacts have zero
 `DT_NEEDED`, and biome shells out to nothing — it only reads and writes files
 the smoke test creates in its own scratch sandbox. Provisioning packages into

@@ -46,6 +46,19 @@ FORMATTED = "const x = 1;\nexport default x;\n"
 # The digits are the contract; the `Version: ` banner around them is not. An
 # `expect.contains(stdout, "biome")` would break on a rebrand, and an
 # `expect.eq(stdout, "Version: 2.5.6")` would churn every release.
+#
+# `--version` DOES NOT PHONE HOME — checked, not assumed, because an
+# update-notifier appending "(latest available: X)" would make this probe both
+# network-dependent and non-deterministic while a shape regex greened either
+# way. Byte-identical with and without a network:
+#     $ ./biome-linux-x64 --version | od -c
+#     0000000  V e r s i o n :   2 . 5 . 6 \n \n     (16 bytes)
+#     $ docker run --network=none … /m/biome-linux-x64-musl --version | od -c
+#     0000000  V e r s i o n :   2 . 5 . 6 \n \n     (identical)
+# Biome's update check is an explicit `biome upgrade` subcommand instead. Note
+# the `version` SUBCOMMAND is a different thing and is deliberately not used
+# here: it prints `CLI: …\nServer: not connected\n`, whose second line depends
+# on whether a biome daemon happens to be running.
 r_version = ocx.run(BIOME, "--version", env = ENV)
 expect.ok(r_version)
 expect.matches(r_version.stdout, r"\d+\.\d+\.\d+")
